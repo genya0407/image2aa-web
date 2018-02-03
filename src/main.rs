@@ -4,13 +4,13 @@
 
 extern crate rocket;
 #[macro_use] extern crate rocket_contrib;
-extern crate png2aa;
+extern crate image2aa;
 
 use std::io;
 use rocket_contrib::Json;
 use rocket::response::NamedFile;
 
-use png2aa::{filter, utils};
+use image2aa::{filter, utils};
 
 #[derive(FromForm)]
 struct Options {
@@ -39,7 +39,7 @@ fn image(options: Options, image_binary: rocket::Data) -> Json {
     let mut binary_filter = filter::binary::default();
     if let Some(thresh) = options.line_detect_thresh { binary_filter.thresh = thresh; }
 
-    let image_array = utils::read_png(Box::new(image_binary.open())).map_err(|e| println!("{}", e)).unwrap();
+    let image_array = utils::read_image(image_binary.open()).map_err(|e| println!("{}", e)).unwrap();
 
     let grayscale_array = filter::grayscale::default().run(image_array);
     let gradient_array = filter::line::default().run(grayscale_array.clone());

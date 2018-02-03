@@ -4,7 +4,7 @@ version = "0.1.2"
 authors = ["Yusuke Sangenya <longinus.eva@gmail.com>"]
 
 [dependencies]
-png2aa = "0.1.2"
+image2aa = "0.1.3"
 rocket = "0.3.6"
 rocket_codegen = "0.3.6"
 rocket_contrib = "0.3.6"

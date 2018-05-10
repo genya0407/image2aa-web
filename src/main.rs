@@ -6,12 +6,14 @@ extern crate dotenv;
 extern crate rocket;
 #[macro_use] extern crate rocket_contrib;
 extern crate image2aa;
+extern crate image2aa_web;
 extern crate rusoto_core;
 extern crate rusoto_credential;
 extern crate rusoto_s3;
 extern crate image;
 extern crate time;
 extern crate sha3;
+extern crate rand;
 
 use std::io;
 use std::io::Read;
@@ -19,18 +21,45 @@ use std::env;
 use std::sync::mpsc;
 use std::sync::mpsc::SyncSender;
 use std::thread;
+use std::path::Path;
+use rocket::response::{Responder, NamedFile};
+use rocket::request::LenientForm;
+use rocket::{Request, Response, State};
+use rocket::http::Status;
 use rocket_contrib::Json;
-use rocket::response::NamedFile;
-use rocket::State;
 use rusoto_s3::S3;
 use sha3::{Digest, Sha3_256};
 use image2aa::{filter, utils};
+use rand::Rng;
+
+struct ContentDisposition(NamedFile, String);
+
+impl<'r> Responder<'r> for ContentDisposition {
+    fn respond_to(self, request: &Request) -> Result<Response<'r>, Status> {
+        let filename = self.1.clone();
+        match self.0.respond_to(request) {
+            Ok(mut response) => {
+                response.adjoin_raw_header(
+                    "Content-Disposition",
+                    format!("attachment; filename=\"{}\"", filename)
+                );
+                Ok(response)
+            },
+            Err(status) => Err(status)
+        }
+    }
+}
 
 #[derive(FromForm)]
 struct Options {
     blocksize: Option<usize>,
     char_detect_thresh: Option<u32>,
     line_detect_thresh: Option<u32>
+}
+
+#[derive(FromForm)]
+struct AsciiArtForm {
+    text: String
 }
 
 struct S3Uploader {
@@ -74,6 +103,25 @@ impl S3Uploader {
 #[get("/")]
 fn index() -> io::Result<NamedFile> {
     NamedFile::open("static/index.html")
+}
+
+#[post("/download_aa_image", data = "<ascii_art>")]
+fn download_aa_image(ascii_art: LenientForm<AsciiArtForm>) -> io::Result<ContentDisposition> {
+    println!("hoge");
+    let filename = format!(
+        "/tmp/{}_{}.png",
+        time::now().to_timespec().sec,
+        rand::thread_rng().gen_ascii_chars().take(20).collect::<String>()
+    );
+    let path = Path::new(&filename);
+    let image = image2aa_web::text2image(ascii_art.get().text.clone());
+    image.save(path.clone()).unwrap();
+    NamedFile::open(&filename).map(|named_file| {
+        ContentDisposition(
+            named_file,
+            path.file_name().unwrap().to_string_lossy().to_string()
+        )
+    })
 }
 
 #[post("/image", data = "<image_binary>")]
@@ -121,6 +169,6 @@ fn main() {
 
     rocket::ignite()
         .manage(tx)
-        .mount("/", routes![index, image, image_without_options])
+        .mount("/", routes![index, image, image_without_options, download_aa_image])
         .launch();
 }

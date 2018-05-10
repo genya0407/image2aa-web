@@ -41,7 +41,10 @@
             <div id='view'>
                 <div>
                     <div>
-                        <textarea :style="textarea_style">{{ aa }}</textarea>
+                        <form action='/download_aa_image' method='POST'>
+                            <textarea :style="textarea_style" name='text'>{{ aa }}</textarea>
+                            <button type='submit'>AAの画像をDL</button>
+                        </form>
                         <span>{{ aa_text_count }}文字</span>
                     </div>
                 </div>

@@ -133,9 +133,9 @@ fn image_without_options(image_binary: rocket::Data, tx: State<SyncSender<Vec<u8
 #[post("/image?<options>", data = "<image_binary>")]
 fn image(options: Options, image_binary: rocket::Data, tx: State<SyncSender<Vec<u8>>>) -> Json {
     let mut image_buf = vec![];
-    image_binary.open().read_to_end(&mut image_buf).unwrap();
+    image_binary.open().read_to_end(&mut image_buf).expect("Failed to read image.");
 
-    tx.send(image_buf.clone()).unwrap();
+    tx.send(image_buf.clone()).expect("Failed to upload image.");
 
     let mut hough_filter = filter::hough::default();
     if let Some(block_size) = options.blocksize { hough_filter.block_size = block_size; }
@@ -162,7 +162,7 @@ fn main() {
     thread::spawn(move || {
         let mut uploader = S3Uploader::new();
         loop {
-            let image_buf = rx.recv().unwrap();
+            let image_buf = rx.recv().expect("Failed to receive image.");
             uploader.upload_s3(image_buf);
         }
     });

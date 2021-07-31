@@ -1,9 +1,3 @@
-# png2aa-web
+# image2aa-web
 
-Web interface for [png2aa](https://crates.io/crates/png2aa).
-
-## Run
-
-```shell-session
-$ cargo run --release
-```
+This project was merged into [image2aa](https://github.com/genya0407/image2aa)

@@ -1,6 +1,3 @@
-#![feature(plugin)]
-#![feature(proc_macro_derive)]
-
 extern crate dotenv;
 #[macro_use]
 extern crate rocket;
@@ -13,24 +10,18 @@ extern crate time;
 
 use image2aa::{filter, utils};
 use rand::Rng;
+use rocket::form::Form;
+use rocket::fs::NamedFile;
 use rocket::http::Status;
-use rocket::request::LenientForm;
-use rocket::response::{NamedFile, Responder};
-use rocket::tokio::io::AsyncReadExt;
-use rocket::{Request, Response, State};
-use rocket_contrib::Json;
-use sha3::Sha3_256;
-use std::env;
-use std::io;
+use rocket::response::Responder;
+use rocket::serde::{json::Json, Serialize};
+use rocket::{Request, Response};
 use std::path::Path;
-use std::sync::mpsc;
-use std::sync::mpsc::SyncSender;
-use std::thread;
 
 struct ContentDisposition(NamedFile, String);
 
 impl<'r, 'o: 'r> Responder<'r, 'o> for ContentDisposition {
-    fn respond_to(self, request: &Request) -> Result<Response<'r>, Status> {
+    fn respond_to(self, request: &'r Request) -> Result<Response<'o>, Status> {
         let filename = self.1.clone();
         match self.0.respond_to(request) {
             Ok(mut response) => {
@@ -57,51 +48,66 @@ struct AsciiArtForm {
     text: String,
 }
 
-struct S3Uploader {
-    uploaded_image_hashes: Vec<String>,
-}
-
 #[get("/")]
-fn index() -> io::Result<NamedFile> {
-    NamedFile::open("static/index.html")
+async fn index() -> Option<NamedFile> {
+    NamedFile::open("static/index.html").await.ok()
 }
 
 #[post("/download_aa_image", data = "<ascii_art>")]
-fn download_aa_image(ascii_art: LenientForm<AsciiArtForm>) -> io::Result<ContentDisposition> {
-    println!("hoge");
+async fn download_aa_image(ascii_art: Form<AsciiArtForm>) -> Option<ContentDisposition> {
+    use std::time::SystemTime;
+
     let filename = format!(
         "/tmp/{}_{}.png",
-        time::now().to_timespec().sec,
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
         rand::thread_rng()
             .gen_ascii_chars()
             .take(20)
             .collect::<String>()
     );
     let path = Path::new(&filename);
-    let image = image2aa_web::text2image(ascii_art.get().text.clone());
+    let image = image2aa_web::text2image(ascii_art.text.clone());
     image.save(path.clone()).unwrap();
-    NamedFile::open(&filename).map(|named_file| {
-        ContentDisposition(
-            named_file,
-            path.file_name().unwrap().to_string_lossy().to_string(),
-        )
-    })
+    NamedFile::open(&filename)
+        .await
+        .map(|named_file| {
+            ContentDisposition(
+                named_file,
+                path.file_name().unwrap().to_string_lossy().to_string(),
+            )
+        })
+        .ok()
 }
 
 #[post("/image", data = "<image_binary>")]
-fn image_without_options(image_binary: rocket::Data) -> Json {
+async fn image_without_options<'r>(image_binary: rocket::Data<'r>) -> Json<AsciiArt> {
     let options = Options {
         blocksize: None,
         char_detect_thresh: None,
         line_detect_thresh: None,
     };
-    image(options, image_binary)
+    image_with_option(options, image_binary).await
+}
+
+#[derive(Serialize)]
+struct AsciiArt {
+    aa: String,
 }
 
 #[post("/image?<options>", data = "<image_binary>")]
-fn image(options: Options, image_binary: rocket::Data) -> Json {
+async fn image_with_option<'r>(options: Options, image_binary: rocket::Data<'r>) -> Json<AsciiArt> {
+    use crate::rocket::tokio::io::AsyncReadExt;
+    use rocket::data::ByteUnit;
+
     let mut image_buf = vec![];
-    image_binary.open().read_to_end(&mut image_buf).await;
+    image_binary
+        .open(30 * ByteUnit::MB)
+        .read_to_end(&mut image_buf)
+        .await
+        .unwrap();
 
     let mut hough_filter = filter::hough::default();
     if let Some(block_size) = options.blocksize {
@@ -125,16 +131,20 @@ fn image(options: Options, image_binary: rocket::Data) -> Json {
     let line_array = binary_filter.run(gradient_array).mapv(|e| e as f32) * 250.;
     let hough_array = hough_filter.run(line_array);
     let aa = filter::ascii_art::default().run(hough_array);
-    Json(json!({ "aa": aa }))
+    Json(AsciiArt { aa: aa })
 }
 
-fn main() {
+#[launch]
+fn rocket() -> rocket::Rocket<rocket::Build> {
     dotenv::dotenv().ok();
 
-    rocket::ignite()
-        .mount(
-            "/",
-            routes![index, image, image_without_options, download_aa_image],
-        )
-        .launch();
+    rocket::build().mount(
+        "/",
+        routes![
+            index,
+            image_with_option,
+            image_without_options,
+            download_aa_image
+        ],
+    )
 }
